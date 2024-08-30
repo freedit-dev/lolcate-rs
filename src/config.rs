@@ -17,11 +17,11 @@
  * along with Lolcate.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::process;
 use std::{convert, fs, io::prelude::*, path};
-use toml::de::Error;
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
@@ -36,17 +36,12 @@ pub struct Config {
     pub ignore_hidden: bool,
 }
 
-#[derive(Debug, Deserialize, PartialEq, Copy, Clone)]
+#[derive(Debug, Deserialize, PartialEq, Copy, Clone, Default)]
 pub enum Skip {
+    #[default]
     None,
     Dirs,
     Files,
-}
-
-impl Default for Skip {
-    fn default() -> Self {
-        Skip::None
-    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -54,13 +49,10 @@ pub struct GlobalConfig {
     pub types: HashMap<String, String>,
 }
 
-pub fn read_toml_file<'a, 'de, P: ?Sized, T>(
-    path: &'a P,
-    buffer: &'de mut String,
-) -> Result<T, Error>
+pub fn read_toml_file<P, T>(path: &P, buffer: &mut String) -> Result<T, basic_toml::Error>
 where
-    P: convert::AsRef<path::Path>,
-    T: Deserialize<'de>,
+    P: convert::AsRef<path::Path> + ?Sized,
+    T: DeserializeOwned,
 {
     let mut configuration_file: fs::File = match fs::OpenOptions::new().read(true).open(path) {
         Ok(val) => val,
@@ -71,7 +63,7 @@ where
     };
 
     match configuration_file.read_to_string(buffer) {
-        Ok(_bytes) => toml::from_str(buffer.as_str()),
+        Ok(_bytes) => basic_toml::from_str(buffer.as_str()),
         Err(error) => panic!(
             "The data in this stream is not valid UTF-8.\nSee error: '{}'\n",
             error

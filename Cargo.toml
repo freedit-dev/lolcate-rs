@@ -18,17 +18,16 @@ exclude = [
 ]
 
 [dependencies]
-bstr = "0.2"
+bstr = "1"
 clap = "2"
 crossbeam-channel = "0.5"
-dirs = "3.0"
+dirs = "5"
 ignore = "0.4"
-lazy_static = "1.4.0"
-lz4 = "1"
+lz4 = "1.26.0"
 regex = "1"
-serde = { version = "1.0", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
 termcolor = "1"
-toml = "0.5"
+basic-toml = "0.1"
 walkdir = "2"
 
 [target.'cfg(not(windows))'.dependencies]

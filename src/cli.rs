@@ -22,7 +22,7 @@ use clap::{crate_version, App, Arg}; // SubCommand
 
 pub fn build_cli() -> App<'static, 'static> {
     App::new("Lolcate")
-        .version(&crate_version!()[..])
+        .version(crate_version!())
         .author("Nicolas Girard <girard.nicolas@gmail.com>")
         .about("Find files by name -- A better locate / mlocate / updatedb")
         .arg(Arg::with_name("create")

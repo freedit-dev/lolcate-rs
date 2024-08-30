@@ -20,7 +20,6 @@
 use crate::config::read_toml_file;
 extern crate crossbeam_channel as channel;
 use bstr::io::BufReadExt;
-use lazy_static::lazy_static;
 use lz4::EncoderBuilder;
 use std::collections::HashMap;
 use std::fs;
@@ -29,6 +28,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::process;
 use std::str;
+use std::sync::LazyLock;
 use std::thread;
 use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
 
@@ -133,7 +133,7 @@ fn get_types_map() -> HashMap<String, String> {
 
 fn check_db_config(config: &config::Config, toml_file: &PathBuf) {
     // Check config
-    if config.dirs.len() == 0 {
+    if config.dirs.is_empty() {
         eprintln!(
             "Please edit file {:?} and add at least a directory to scan.",
             toml_file
@@ -189,12 +189,12 @@ fn create_database(db_name: &str) -> std::io::Result<()> {
         eprintln!("Database {} already exists", &db_name);
         process::exit(1);
     }
-    let config_fn = config_fn(&db_name);
+    let config_fn = config_fn(db_name);
     fs::create_dir_all(config_fn.parent().unwrap())?;
     let mut f = fs::File::create(&config_fn)?;
     f.write_all(PROJECT_CONFIG_TEMPLATE.as_bytes())?;
 
-    let ignores_fn = ignores_fn(&db_name);
+    let ignores_fn = ignores_fn(db_name);
     f = fs::File::create(&ignores_fn)?;
     f.write_all(PROJECT_IGNORE_TEMPLATE.as_bytes())?;
 
@@ -231,7 +231,7 @@ fn info_databases() -> std::io::Result<()> {
     writeln!(&mut stdout, "  {}\n", global_config_fn().display())?;
     for entry in walker.filter_entry(|e| e.file_type().is_dir()) {
         if let Some(db_name) = entry.unwrap().file_name().to_str() {
-            let config_fn = config_fn(&db_name);
+            let config_fn = config_fn(db_name);
             let config = get_db_config(&config_fn);
             let description = config.description;
             let mut db_fn = lolcate_data_path();
@@ -240,7 +240,7 @@ fn info_databases() -> std::io::Result<()> {
                 db_name.to_string(),
                 description.to_string(),
                 config_fn.display().to_string(),
-                ignores_fn(&db_name).display().to_string(),
+                ignores_fn(db_name).display().to_string(),
                 db_fn.display().to_string(),
             ));
         }
@@ -301,7 +301,7 @@ pub fn walker(config: &config::Config, database: &str) -> ignore::WalkParallel {
     for path in &paths[1..] {
         wd.add(path);
     }
-    wd.add_ignore(ignores_fn(&database));
+    wd.add_ignore(ignores_fn(database));
     wd.threads(4);
     wd.build_parallel()
 }
@@ -314,7 +314,7 @@ fn update_databases(databases: Vec<String>) -> std::io::Result<()> {
 }
 
 fn update_database(db_name: &str) -> std::io::Result<()> {
-    let config_fn = config_fn(&db_name);
+    let config_fn = config_fn(db_name);
     if !config_fn.exists() {
         eprintln!("Config file not found for database {}.\nPerhaps you forgot to run lolcate --create {} ?", &db_name, &db_name);
         process::exit(1);
@@ -323,7 +323,7 @@ fn update_database(db_name: &str) -> std::io::Result<()> {
     check_db_config(&config, &config_fn);
     let skip = config.skip;
     let ignore_symlinks = config.ignore_symlinks;
-    let db_path = db_fn(&db_name);
+    let db_path = db_fn(db_name);
     let parent_path = db_path.parent().unwrap();
     if !parent_path.exists() {
         fs::create_dir_all(parent_path)?;
@@ -351,15 +351,16 @@ fn update_database(db_name: &str) -> std::io::Result<()> {
         result
     });
 
-    walker(&config, &db_name).run(|| {
+    walker(&config, db_name).run(|| {
         let tx = tx.clone();
-        Box::new(move |entry| { //: Result<ignore::DirEntry,ignore::Error>
+        Box::new(move |entry| {
+            //: Result<ignore::DirEntry,ignore::Error>
             use ignore::WalkState::*;
             let entry = match entry {
-                    Ok(_entry) => _entry,
+                Ok(_entry) => _entry,
                 Err(err) => {
                     eprintln!("failed to access entry ({})", err);
-                    return Continue
+                    return Continue;
                 }
             };
             if skip != config::Skip::None || ignore_symlinks {
@@ -368,10 +369,8 @@ fn update_database(db_name: &str) -> std::io::Result<()> {
                         if skip == config::Skip::Dirs {
                             return Continue;
                         };
-                    } else {
-                        if skip == config::Skip::Files {
-                            return Continue;
-                        };
+                    } else if skip == config::Skip::Files {
+                        return Continue;
                     }
                     if ignore_symlinks && ft.is_symlink() {
                         return Continue;
@@ -391,11 +390,10 @@ fn update_database(db_name: &str) -> std::io::Result<()> {
 }
 
 fn build_regex(pattern: &str, ignore_case: bool) -> Regex {
-    lazy_static! {
-        static ref UPPER_RE: Regex = Regex::new(r"[[:upper:]]").unwrap();
-    };
+    static UPPER_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[[:upper:]]").unwrap());
+
     let re: Regex = match RegexBuilder::new(pattern)
-        .case_insensitive(ignore_case || !UPPER_RE.is_match(&pattern))
+        .case_insensitive(ignore_case || !UPPER_RE.is_match(pattern))
         .build()
     {
         Ok(re) => re,
@@ -413,7 +411,7 @@ fn lookup_databases(
     types_re: &[Regex],
 ) -> std::io::Result<()> {
     for db_name in db_names {
-        lookup_database(&db_name, patterns_re, &types_re)?;
+        lookup_database(&db_name, patterns_re, types_re)?;
     }
     Ok(())
 }
@@ -423,7 +421,7 @@ fn lookup_database(
     patterns_re: &[Regex],
     types_re: &[Regex],
 ) -> std::io::Result<()> {
-    let db_file = db_fn(&db_name);
+    let db_file = db_fn(db_name);
     if !db_file.parent().unwrap().exists() {
         eprintln!(
             "Database {} doesn't exist. Perhaps you forgot to run lolcate --create {} ?",
@@ -440,23 +438,21 @@ fn lookup_database(
     }
     let input_file = fs::File::open(db_file)?;
     let decoder = lz4::Decoder::new(input_file)?;
-    let reader = io::BufReader::new(decoder);
+    let mut reader = io::BufReader::new(decoder);
     let stdout = io::stdout();
     let lock = stdout.lock();
     let mut w = io::BufWriter::new(lock); // DEFAULT_BUF_SIZE: usize = 8 * 1024;
     reader.for_byte_line(|_line| {
         let line = str::from_utf8(_line).unwrap();
-        if types_re.len() > 0 {
-            if !types_re.iter().any(|re| re.is_match(&line)) {
-                return Ok(true);
-            }
+        if !types_re.is_empty() && !types_re.iter().any(|re| re.is_match(line)) {
+            return Ok(true);
         }
-        if !patterns_re.iter().all(|re| re.is_match(&line)) {
+        if !patterns_re.iter().all(|re| re.is_match(line)) {
             return Ok(true);
         }
         #[allow(unused_must_use)]
         {
-            w.write_all(&line.as_bytes());
+            w.write_all(line.as_bytes());
             w.write_all(b"\n");
         }
         Ok(true)
@@ -476,7 +472,7 @@ fn main() -> std::io::Result<()> {
     };
 
     if args.is_present("create") {
-        create_database(&database)?;
+        create_database(database)?;
         process::exit(0);
     }
 
@@ -496,10 +492,8 @@ fn main() -> std::io::Result<()> {
         .value_of("type")
         .unwrap_or_default()
         .split(",")
-        .map(|n| types_map.get(n))
-        .filter(|t| t.is_some())
-        .map(|t| t.unwrap())
-        .map(|t| Regex::new(&t).unwrap())
+        .filter_map(|n| types_map.get(n))
+        .map(|t| Regex::new(t).unwrap())
         .collect::<Vec<_>>();
 
     let ignore_case = args.is_present("ignore_case");
