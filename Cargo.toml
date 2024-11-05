@@ -39,3 +39,5 @@ name = "lolcate"
 
 [profile.release]
 lto = true
+strip = true
+codegen-units = 1
